@@ -268,9 +268,11 @@ App.prototype.getMap = function(div, params) {
     params = params || {};
     params.backgroundColor = HTMLColor2RGBA(params.backgroundColor);
     args.push(params);
+
+    var divRect = getDivRect(div);
     
     self.set("div", div);
-    args.push(getDivSize(div));
+    args.push(divRect);
     var elements = [];
     var elemId, clickable;
     
@@ -283,7 +285,7 @@ App.prototype.getMap = function(div, params) {
       }
       elements.push({
         id: elemId,
-        size: getDivSize(element)
+        size: getDivRect(element)
       });
       i++;
     }
@@ -293,12 +295,16 @@ App.prototype.getMap = function(div, params) {
     div.addEventListener("DOMNodeInserted", _append_child);
     
     self.set("keepWatching", true);
+    
+    var backgroundCss = updateBackgroundCssClass(divRect);
+    var mapDiv = div;
+    
     var className;
     while(div.parentNode) {
       div.style.backgroundColor = 'rgba(0,0,0,0)';
       className = div.className;
 
-      // prevent multiple readding the class
+      // prevent multiple reading the class
       if (div.classList && !div.classList.contains('_gmaps_cdv_')) {
         div.classList.add('_gmaps_cdv_');
       } else if (div.className && !div.className.indexOf('_gmaps_cdv_') == -1) {
@@ -307,6 +313,8 @@ App.prototype.getMap = function(div, params) {
 
       div = div.parentNode;
     }
+
+    mapDiv.style.background = "url('" + backgroundCss + "')";
   }
   cordova.exec(function() {
     setTimeout(function() {
@@ -622,7 +630,7 @@ var _append_child = function(event) {
   if (target.nodeType != 1) {
     return;
   }
-  var size = getDivSize(target);
+  var size = getDivRect(target);
   var elemId = "pgm" + Math.floor(Math.random() * Date.now());
   target.setAttribute("__pluginDomId", elemId);
   
@@ -686,9 +694,10 @@ App.prototype.setDiv = function(div) {
     self.set("div", null);
     self.set("keepWatching", false);
   } else {
+    var divRect = getDivRect(div);
     var children = getAllChildren(div);;
     self.set("div", div);
-    args.push(getDivSize(div));
+    args.push(divRect);
     var elements = [];
     var elemId;
     var clickable;
@@ -709,13 +718,14 @@ App.prototype.setDiv = function(div) {
       }
       elements.push({
         id: elemId,
-        size: getDivSize(element)
+        size: getDivRect(element)
       });
     }
     args.push(elements);
     
     div.addEventListener("DOMNodeRemoved", _remove_child);
     div.addEventListener("DOMNodeInserted", _append_child);
+    var mapDiv = div;
     
     var className;
     while(div.parentNode) {
@@ -731,6 +741,9 @@ App.prototype.setDiv = function(div) {
 
       div = div.parentNode;
     }
+    var backgroundCss = updateBackgroundCssClass(divRect);
+    mapDiv.style.background = "url('" + backgroundCss + "')";
+    
     setTimeout(function() {
       self.refreshLayout();
       self.set("keepWatching", true);
@@ -1943,10 +1956,8 @@ function isDom(element) {
          typeof element === "object" &&
          "getBoundingClientRect" in element;
 }
-function getDivSize(div) {
-  if (!div) {
-    return;
-  }
+function getPageRect() {
+  var doc = document.documentElement;
   
   var pageWidth = window.innerWidth || 
                   document.documentElement.clientWidth ||
@@ -1954,26 +1965,34 @@ function getDivSize(div) {
       pageHeight = window.innerHeight ||
                    document.documentElement.clientHeight ||
                    document.body.clientHeight;
-
-  var doc = document.documentElement;
   var pageLeft = (window.pageXOffset || doc.scrollLeft) - (doc.clientLeft || 0);
   var pageTop = (window.pageYOffset || doc.scrollTop)  - (doc.clientTop || 0);
   
-  var rect = div.getBoundingClientRect();
-  var divSize = {
-    'left': rect.left + pageLeft,
-    'top': rect.top + pageTop,
-    'width': rect.width,
-    'height': rect.height/*,
-    'pageWidth': pageWidth,
-    'pageHeight': pageHeight,
-    'pageLeft': pageLeft,
-    'pageTop': pageTop*/
+  return {
+    'width': pageWidth,
+    'height': pageHeight,
+    'left': pageLeft,
+    'top': pageTop
   };
-  divSize.width = divSize.width < pageWidth ? divSize.width : pageWidth;
-  divSize.height = divSize.height < pageHeight ? divSize.height : pageHeight;
+}
+function getDivRect(div) {
+  if (!div) {
+    return;
+  }
   
-  return divSize;
+  var pageRect = getPageRect();
+  
+  var rect = div.getBoundingClientRect();
+  var divRect = {
+    'left': rect.left + pageRect.left,
+    'top': rect.top + pageRect.top,
+    'width': rect.width,
+    'height': rect.height
+  };
+  divRect.width = divRect.width < pageRect.width ? divRect.width : pageRect.width;
+  divRect.height = divRect.height < pageRect.height ? divRect.height : pageRect.height;
+  
+  return divRect;
 }
 function onMapResize(event) {
   var self = window.plugin.google.maps.Map;
@@ -1990,7 +2009,7 @@ function onMapResize(event) {
     var children = getAllChildren(div);
     var elemId, clickable;
     
-    args.push(getDivSize(div));
+    args.push(getDivRect(div));
     for (var i = 0; i < children.length; i++) {
       element = children[i];
       if (element.nodeType != 1) {
@@ -2007,7 +2026,7 @@ function onMapResize(event) {
       }
       elements.push({
         id: elemId,
-        size: getDivSize(element)
+        size: getDivRect(element)
       });
     }
     args.push(elements);
@@ -2072,16 +2091,15 @@ _mapInstance.addEventListener("keepWatching_changed", function(oldValue, newValu
   if (newValue !== true) {
     return;
   }
-  var prevSize = null;
+  var prevRect = null;
   var children;
   var prevChildrenCnt = 0;
-  var divSize, childCnt = 0;
+  var divRect, childCnt = 0;
   if (window._watchDogTimer) {
     clearInterval(window._watchDogTimer);
   }
-  function init()
-  {
-    window._watchDogTimer = window.setInterval(function() { myFunc(); }, _mapInstance.getWatchDogTimer());
+  function init() {
+    window._watchDogTimer = window.setInterval(myFunc, _mapInstance.getWatchDogTimer());
   }
   function myFunc()
   {
@@ -2096,19 +2114,19 @@ _mapInstance.addEventListener("keepWatching_changed", function(oldValue, newValu
         return;
       }
       prevChildrenCnt = childCnt;
-      divSize = getDivSize(div);
-      if (prevSize) {
-        if (divSize.left != prevSize.left ||
-            divSize.top != prevSize.top ||
-            divSize.width != prevSize.width ||
-            divSize.height != prevSize.height ) {
+      divRect = getDivRect(div);
+      if (prevRect) {
+        if (divRect.left != prevRect.left ||
+            divRect.top != prevRect.top ||
+            divRect.width != prevRect.width ||
+            divRect.height != prevRect.height ) {
           onMapResize();
         }
       }
-      prevSize = divSize;
+      prevRect = divRect;
     }
     div = null;
-    divSize = null;
+    divRect = null;
     childCnt = null;
     children = null;
     clearInterval(window._watchDogTimer);
@@ -2126,6 +2144,33 @@ _mapInstance.addEventListener("keepWatching_changed", function(oldValue, newValu
   }
   window._watchDogTimer = null;
 });
+
+function updateBackgroundCssClass(divRect) {
+  var pageRect = getPageRect();
+  
+  var canvas = document.createElement("canvas");
+  canvas.width = pageRect.width;
+  canvas.height = pageRect.height;
+  
+  var context = canvas.getContext("2d");
+  context.fillStyle = "#FF0000";
+  
+  // The upper side of the map div.
+  context.fillRect(0, 0, pageRect.width, divRect.top);
+
+  // The left side of the map div.
+  context.fillRect(0, divRect.top, pageRect.left, divRect.top);
+  
+  // The right side of the map div.
+  context.fillRect(divRect.right, divRect.top, pageRect.width - divRect.right, divRect.height);
+  
+  // The bottom side of the map div.
+  context.fillRect(0, divRect.top + divRect.height, pageRect.width, pageRect.height - divRect.top - divRect.height);
+  
+  var base64 = canvas.toDataURL("image/gif");
+  console.log(base64);
+  return base64;
+}
 /*****************************************************************************
  * Name space
  *****************************************************************************/
